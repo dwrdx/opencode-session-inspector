@@ -82,7 +82,19 @@ export interface ListFilter {
 
 export class NotFoundError extends Error {}
 
-const SESSION_SELECT = `
+/**
+ * Detect the `workspace` table columns so the session query works across opencode
+ * schema variants (older builds expose `name`/`directory`, newer ones `binding`).
+ */
+function workspaceColumns(db: DatabaseSync): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(workspace)`).all() as { name: string }[]
+  return new Set(rows.map((row) => row.name))
+}
+
+function buildSessionSelect(workspaceCols: Set<string>): string {
+  const nameExpr = workspaceCols.has("name") ? "w.name" : "w.binding"
+  const dirExpr = workspaceCols.has("directory") ? "w.directory" : workspaceCols.has("name") ? "w.name" : "w.binding"
+  return `
   SELECT s.id, s.project_id, s.workspace_id, s.parent_id, s.slug, s.directory, s.path,
          s.title, s.version, s.agent, s.model, s.cost,
          s.tokens_input, s.tokens_output, s.tokens_reasoning, s.tokens_cache_read, s.tokens_cache_write,
@@ -90,11 +102,12 @@ const SESSION_SELECT = `
          (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) AS message_count,
          (SELECT COUNT(*) FROM session_message sm WHERE sm.session_id = s.id) AS smessage_count,
          p.name AS project_name,
-         w.binding AS workspace_name, w.binding AS workspace_directory
+         ${nameExpr} AS workspace_name, ${dirExpr} AS workspace_directory
   FROM session s
   LEFT JOIN project p ON p.id = s.project_id
   LEFT JOIN workspace w ON w.id = s.workspace_id
-`
+  `
+}
 
 export function openDb(filename: string): DatabaseSync {
   if (!existsSync(filename)) {
@@ -111,9 +124,11 @@ const like = (value: string) => `%${value.replace(/[\\%_]/g, "\\$&")}%`
 export class InspectorDb {
   readonly db: DatabaseSync
   readonly filename: string
+  private readonly sessionSelect: string
   constructor(filename: string) {
     this.filename = filename
     this.db = openDb(filename)
+    this.sessionSelect = buildSessionSelect(workspaceColumns(this.db))
   }
 
   list(filter: ListFilter): SessionRow[] {
@@ -139,7 +154,7 @@ export class InspectorDb {
       where.push(`s.time_updated <= @to`)
       params["to"] = filter.to
     }
-    const sql = `${SESSION_SELECT} ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY s.time_updated DESC LIMIT @limit OFFSET @offset`
+    const sql = `${this.sessionSelect} ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY s.time_updated DESC LIMIT @limit OFFSET @offset`
     params["limit"] = filter.limit
     params["offset"] = filter.offset
     return this.db.prepare(sql).all(params) as unknown as SessionRow[]
@@ -175,7 +190,7 @@ export class InspectorDb {
   }
 
   getSession(id: string): SessionRow | undefined {
-    const row = this.db.prepare(`${SESSION_SELECT} WHERE s.id = ?`).get(id) as SessionRow | undefined
+    const row = this.db.prepare(`${this.sessionSelect} WHERE s.id = ?`).get(id) as SessionRow | undefined
     return row
   }
 
@@ -183,7 +198,7 @@ export class InspectorDb {
     if (ids.length === 0) return []
     const placeholders = ids.map(() => "?").join(", ")
     return this.db
-      .prepare(`${SESSION_SELECT} WHERE s.id IN (${placeholders})`)
+      .prepare(`${this.sessionSelect} WHERE s.id IN (${placeholders})`)
       .all(...ids) as unknown as SessionRow[]
   }
 
