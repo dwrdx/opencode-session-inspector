@@ -1,0 +1,17 @@
+{
+  "name": "opencode-session-inspector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline session analysis tool for opencode: open, search, delete and export sessions as HTML",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.ts",
+    "start:watch": "node --disable-warning=ExperimentalWarning --watch src/server.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}

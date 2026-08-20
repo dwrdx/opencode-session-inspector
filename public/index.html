@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opencode-session-inspector</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="app-top">
+  <div class="brand">
+    <h1>opencode-session-inspector</h1>
+    <span id="dbPath" class="db-path muted">…</span>
+  </div>
+  <div class="tools">
+    <span id="statTotal" class="muted"></span>
+    <button id="themeToggle" type="button" title="Toggle light/dark mode">light</button>
+    <button id="btnRefresh" type="button" title="Refresh">refresh</button>
+  </div>
+</header>
+
+<section class="filters" aria-label="Session filters">
+  <input id="fSearch" type="search" placeholder="Search title, directory, agent…" autocomplete="off">
+  <input id="fAgent" type="text" placeholder="Agent" autocomplete="off">
+  <input id="fModel" type="text" placeholder="Model" autocomplete="off">
+  <span class="filter-sep"></span>
+  <label>from <input id="fFrom" type="datetime-local" step="1"></label>
+  <label>to <input id="fTo" type="datetime-local" step="1"></label>
+  <button id="btnApply" type="button">apply</button>
+  <button id="btnClear" type="button">clear</button>
+</section>
+
+<main>
+  <table class="sessions">
+    <thead>
+      <tr>
+        <th class="col-title">title</th>
+        <th class="col-dir">directory</th>
+        <th class="col-agent">agent</th>
+        <th class="col-model">model</th>
+        <th class="col-updated">updated</th>
+        <th class="col-count">msgs</th>
+        <th class="col-cost">cost</th>
+        <th class="col-actions">actions</th>
+      </tr>
+    </thead>
+    <tbody id="sessionsBody">
+      <tr><td colspan="8" class="empty-td muted">loading…</td></tr>
+    </tbody>
+  </table>
+  <div class="pager">
+    <button id="btnPrev" type="button">‹ prev</button>
+    <span id="pageInfo" class="muted"></span>
+    <button id="btnNext" type="button">next ›</button>
+  </div>
+</main>
+
+<div id="confirmOverlay" class="overlay" hidden>
+  <div class="confirm" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <h2 id="confirmTitle">Delete session</h2>
+    <p id="confirmText"></p>
+    <div class="confirm-actions">
+      <button id="btnCancel" type="button" class="ghost">cancel</button>
+      <button id="btnDelete" type="button" class="danger">delete</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
