@@ -90,7 +90,7 @@ const SESSION_SELECT = `
          (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id) AS message_count,
          (SELECT COUNT(*) FROM session_message sm WHERE sm.session_id = s.id) AS smessage_count,
          p.name AS project_name,
-         w.name AS workspace_name, w.directory AS workspace_directory
+         w.binding AS workspace_name, w.binding AS workspace_directory
   FROM session s
   LEFT JOIN project p ON p.id = s.project_id
   LEFT JOIN workspace w ON w.id = s.workspace_id
@@ -211,10 +211,51 @@ export class InspectorDb {
       .all(sessionID) as unknown as SessionInputRow[]
   }
 
-  /** Delete a session (foreign keys cascade to message/part/…) and return whether a row was removed. */
-  deleteSession(id: string): boolean {
-    const res = this.db.prepare(`DELETE FROM session WHERE id = ?`).run(id)
-    return (res.changes ?? 0) > 0
+  /**
+   * Delete a session and all its descendant sub-sessions (recursive via `parent_id`).
+   * Foreign keys cascade to message/part/todo/… for every deleted session.
+   * Returns the ids of the deleted sessions (including `id` itself).
+   */
+  deleteSession(id: string): string[] {
+    return this.deleteSessions([id])
+  }
+
+  /**
+   * Delete several sessions and all their descendant sub-sessions in one transaction.
+   * Returns the full set of deleted session ids (including subtrees).
+   */
+  deleteSessions(ids: readonly string[]): string[] {
+    if (ids.length === 0) return []
+    const deleted: string[] = []
+    const seen = new Set<string>()
+    this.db.exec("BEGIN")
+    try {
+      const placeholders = ids.map(() => "?").join(", ")
+      const rootIds = this.db
+        .prepare(`SELECT id FROM session WHERE id IN (${placeholders})`)
+        .all(...ids) as { id: string }[]
+      const rows = this.db
+        .prepare(
+          `WITH RECURSIVE subtree(id) AS (
+             SELECT id FROM session WHERE id IN (${placeholders})
+             UNION ALL
+             SELECT s.id FROM session s JOIN subtree t ON s.parent_id = t.id
+           )
+           SELECT id FROM subtree`
+        )
+        .all(...ids) as { id: string }[]
+      for (const row of rows) {
+        if (seen.has(row.id)) continue
+        seen.add(row.id)
+        this.db.prepare(`DELETE FROM session WHERE id = ?`).run(row.id)
+        deleted.push(row.id)
+      }
+      this.db.exec("COMMIT")
+    } catch (error) {
+      this.db.exec("ROLLBACK")
+      throw error
+    }
+    return deleted
   }
 }
 

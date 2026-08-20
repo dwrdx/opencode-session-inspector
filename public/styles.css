@@ -73,6 +73,13 @@ code { font-family: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Code", 
 }
 .tools button:hover, .filters button:hover, .pager button:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .tools button:disabled, .pager button:disabled { opacity: .45; cursor: default; border-color: var(--border); }
+.tools button.danger {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+.tools button.danger:hover { border-color: var(--danger); }
+.tools button.danger:disabled { background: var(--chip); color: var(--muted); border-color: var(--border); }
 
 .filters {
   display: flex;
@@ -131,6 +138,12 @@ main { padding: 18px 20px; }
 .sessions td:first-child { padding-left: 20px; }
 .sessions tr:last-child td { border-bottom: none; }
 .sessions tbody tr:hover { background: var(--panel-2); }
+
+.col-check { width: 36px; }
+.col-check-td { text-align: center; }
+.row-check { cursor: pointer; }
+.row-selected { background: color-mix(in srgb, var(--accent) 10%, var(--panel)) !important; }
+.sessions tbody tr.row-selected:hover { background: color-mix(in srgb, var(--accent) 14%, var(--panel)) !important; }
 
 .col-title { width: 30%; }
 .col-dir { width: 24%; }
@@ -220,6 +233,7 @@ main { padding: 18px 20px; }
 .confirm h2 { margin: 0 0 10px; font-size: 16px; color: var(--danger); }
 .confirm p { margin: 0 0 18px; color: var(--fg); word-break: break-all; }
 .confirm .session-dir { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.confirm .confirm-sub { color: var(--muted); font-size: 12px; margin-top: 8px; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .confirm-actions button {
   border-radius: 6px;

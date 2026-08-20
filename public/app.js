@@ -11,7 +11,9 @@ const state = {
   total: 0,
 }
 
+const selected = new Set()
 let deletingId = null
+let bulkDeleteIds = null
 
 const fmtTime = (ms) => {
   if (!ms) return "—"
@@ -65,7 +67,7 @@ async function fetchJson(url, options) {
 
 async function render() {
   const tbody = $("sessionsBody")
-  tbody.innerHTML = `<tr><td colspan="8" class="empty-td muted">loading…</td></tr>`
+  tbody.innerHTML = `<tr><td colspan="9" class="empty-td muted">loading…</td></tr>`
   try {
     const data = await fetchJson(`/api/sessions?${paramFilter()}`)
     state.total = data.total
@@ -73,14 +75,16 @@ async function render() {
     $("pageInfo").textContent = `${data.offset + 1}–${data.offset + data.sessions.length} of ${data.total}`
     $("btnPrev").disabled = data.offset <= 0
     $("btnNext").disabled = data.offset + data.sessions.length >= data.total
+    $("checkAll").checked = data.sessions.length > 0 && data.sessions.every((s) => selected.has(s.id))
+    updateBulkDelete()
 
     if (data.sessions.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-td muted">no sessions match</td></tr>`
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-td muted">no sessions match</td></tr>`
       return
     }
     tbody.innerHTML = buildHierarchyRows([...(data.parents || []), ...data.sessions])
   } catch (error) {
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-td">${esc(error.message)}</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-td">${esc(error.message)}</td></tr>`
   }
 }
 
@@ -107,7 +111,11 @@ function buildHierarchyRows(sessions) {
 
 function sessionRow(s, sub, orphan, depth) {
   const padStyle = sub ? ` style="padding-left:${46 + Math.max(0, depth - 1) * 22}px"` : ""
-  return `<tr class="${sub ? "sub-row" : "main-row"}" data-id="${esc(s.id)}">
+  const checked = selected.has(s.id) ? " checked" : ""
+  return `<tr class="${sub ? "sub-row" : "main-row"}${selected.has(s.id) ? " row-selected" : ""}" data-id="${esc(s.id)}">
+    <td class="col-check-td">
+      <input type="checkbox" class="row-check" data-id="${esc(s.id)}"${checked}>
+    </td>
     <td${padStyle}>
       <div class="title-cell">
         ${sub ? '<span class="sub-arrow">↳</span>' : ""}
@@ -145,6 +153,8 @@ function applyFilters() {
   state.from = toEpoch($("fFrom").value)
   state.to = toEpoch($("fTo").value)
   state.offset = 0
+  selected.clear()
+  updateBulkDelete()
   render()
 }
 
@@ -162,24 +172,59 @@ function clearFilters() {
   state.offset = 0
   render()
 }
-
 function openConfirm(session) {
+  bulkDeleteIds = null
   deletingId = session.id
+  $("confirmTitle").textContent = "Delete session"
   $("confirmText").innerHTML =
-    `Delete <strong>${esc(session.title || "(untitled)")}</strong>?<div class="session-dir">${esc(session.id)} · ${esc(session.directory || "")}</div>`
+    `Delete <strong>${esc(session.title || "(untitled)")}</strong>?<div class="session-dir">${esc(session.id)} · ${esc(session.directory || "")}</div>` +
+    `<div class="confirm-sub">Sub-sessions (children) of this session will be deleted too.</div>`
+  $("confirmOverlay").hidden = false
+}
+
+function openBulkConfirm() {
+  const ids = Array.from(selected)
+  if (ids.length === 0) return
+  bulkDeleteIds = ids
+  deletingId = null
+  $("confirmTitle").textContent = "Delete sessions"
+  $("confirmText").innerHTML =
+    `Delete <strong>${ids.length}</strong> selected session${ids.length === 1 ? "" : "s"}?` +
+    `<div class="confirm-sub">Sub-sessions (children) of each selected session will be deleted too.</div>`
   $("confirmOverlay").hidden = false
 }
 
 function closeConfirm() {
   $("confirmOverlay").hidden = true
   deletingId = null
+  bulkDeleteIds = null
 }
 
-async function deleteSession(id) {
+function updateBulkDelete() {
+  const btn = $("btnBulkDelete")
+  if (!btn) return
+  const n = selected.size
+  btn.disabled = n === 0
+  btn.textContent = n === 0 ? "delete selected" : `delete selected (${n})`
+}
+
+async function deleteSessions(ids) {
   try {
-    const result = await fetchJson(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" })
+    let result
+    if (ids.length === 1) {
+      result = await fetchJson(`/api/sessions/${encodeURIComponent(ids[0])}`, { method: "DELETE" })
+    } else {
+      result = await fetchJson(`/api/sessions`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids }),
+      })
+    }
     if (result.ok) {
-      presentToast(`Deleted ${id}${result.artifacts?.length ? ` (+${result.artifacts.length} artifact(s))` : ""}`)
+      const n = Array.isArray(result.removed) ? result.removed.length : ids.length
+      for (const id of ids) selected.delete(id)
+      updateBulkDelete()
+      presentToast(`Deleted ${n} session${n === 1 ? "" : "s"}${result.artifacts?.length ? ` (+${result.artifacts.length} artifact(s))` : ""}`)
       render()
     }
   } catch (error) {
@@ -221,6 +266,17 @@ function initTheme() {
   })
 }
 
+function tbodyCheckboxes() {
+  return Array.from(document.querySelectorAll("#sessionsBody .row-check"))
+}
+
+function syncRowSelected() {
+  for (const tr of document.querySelectorAll("#sessionsBody tr[data-id]")) {
+    const box = tr.querySelector(".row-check")
+    tr.classList.toggle("row-selected", Boolean(box && box.checked))
+  }
+}
+
 async function init() {
   initTheme()
   try {
@@ -250,6 +306,27 @@ async function init() {
     render()
   })
 
+  $("checkAll").addEventListener("change", (event) => {
+    const checked = event.target.checked
+    for (const box of tbodyCheckboxes()) {
+      box.checked = checked
+      if (checked) selected.add(box.dataset.id)
+      else selected.delete(box.dataset.id)
+    }
+    syncRowSelected()
+    updateBulkDelete()
+  })
+
+  $("sessionsBody").addEventListener("change", (event) => {
+    const box = event.target.closest(".row-check")
+    if (!box) return
+    if (box.checked) selected.add(box.dataset.id)
+    else selected.delete(box.dataset.id)
+    $("checkAll").checked = tbodyCheckboxes().length > 0 && tbodyCheckboxes().every((b) => b.checked)
+    syncRowSelected()
+    updateBulkDelete()
+  })
+
   $("sessionsBody").addEventListener("click", (event) => {
     const btn = event.target.closest("[data-action='delete']")
     if (!btn) return
@@ -258,11 +335,12 @@ async function init() {
     openConfirm({ id, title: tr.querySelector(".session-title").textContent, directory: tr.querySelector(".directory")?.textContent })
   })
 
+  $("btnBulkDelete").addEventListener("click", openBulkConfirm)
   $("btnCancel").addEventListener("click", closeConfirm)
   $("btnDelete").addEventListener("click", () => {
-    const id = deletingId
+    const ids = bulkDeleteIds ?? (deletingId ? [deletingId] : [])
     closeConfirm()
-    if (id) void deleteSession(id)
+    if (ids.length) void deleteSessions(ids)
   })
   $("confirmOverlay").addEventListener("click", (event) => {
     if (event.target === $("confirmOverlay")) closeConfirm()

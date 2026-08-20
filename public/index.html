@@ -17,6 +17,7 @@
     <span id="statTotal" class="muted"></span>
     <button id="themeToggle" type="button" title="Toggle light/dark mode">light</button>
     <button id="btnRefresh" type="button" title="Refresh">refresh</button>
+    <button id="btnBulkDelete" type="button" class="danger" title="Delete selected sessions" disabled>delete selected</button>
   </div>
 </header>
 
@@ -35,6 +36,9 @@
   <table class="sessions">
     <thead>
       <tr>
+        <th class="col-check">
+          <input id="checkAll" type="checkbox" title="Select all on this page">
+        </th>
         <th class="col-title">title</th>
         <th class="col-dir">directory</th>
         <th class="col-agent">agent</th>
@@ -46,7 +50,7 @@
       </tr>
     </thead>
     <tbody id="sessionsBody">
-      <tr><td colspan="8" class="empty-td muted">loading…</td></tr>
+      <tr><td colspan="9" class="empty-td muted">loading…</td></tr>
     </tbody>
   </table>
   <div class="pager">

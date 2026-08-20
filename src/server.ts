@@ -148,6 +148,32 @@ function sendJson(res: ServerResponse, status: number, value: unknown): void {
   sendText(res, status, JSON.stringify(value, null, 2), "application/json; charset=utf-8")
 }
 
+function readJsonBody(req: import("http").IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let data = ""
+    req.setEncoding("utf8")
+    req.on("data", (chunk) => {
+      data += chunk
+      if (data.length > 1_000_000) {
+        reject(new Error("request body too large"))
+        req.destroy()
+      }
+    })
+    req.on("end", () => {
+      if (!data) {
+        resolve(undefined)
+        return
+      }
+      try {
+        resolve(JSON.parse(data))
+      } catch {
+        reject(new Error("invalid JSON body"))
+      }
+    })
+    req.on("error", reject)
+  })
+}
+
 function htmlPage(title: string, message: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title} — opencode-session-inspector</title>
 <style>body{font:16px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif;background:#0f1115;color:#d7dce4;margin:0;padding:60px 24px;text-align:center}a{color:#4c8dff}.wrap{max-width:640px;margin:0 auto}</style></head>
@@ -229,6 +255,32 @@ async function main(): Promise<void> {
         return
       }
 
+      if (pathname === "/api/sessions" && method === "DELETE") {
+        const body = await readJsonBody(req)
+        const ids = Array.isArray(body?.ids) ? body.ids.filter((v): v is string => typeof v === "string") : []
+        if (ids.length === 0) {
+          sendJson(res, 400, { error: "no ids provided" })
+          return
+        }
+        if (ids.length > 1000) {
+          sendJson(res, 400, { error: "too many ids (max 1000)" })
+          return
+        }
+        for (const id of ids) {
+          if (!SESSION_ID_RE.test(id)) {
+            sendJson(res, 400, { error: `invalid session id: ${id}` })
+            return
+          }
+        }
+        const removedIds = inspector.deleteSessions(ids)
+        const artifacts: string[] = []
+        for (const deletedId of removedIds) {
+          artifacts.push(...(await removeSessionArtifacts(dbConfig.dataDir, deletedId)))
+        }
+        sendJson(res, 200, { ok: true, removed: removedIds, artifacts })
+        return
+      }
+
       const sessionsMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/)
       if (sessionsMatch && method === "DELETE") {
         const id = sessionsMatch[1]
@@ -240,9 +292,12 @@ async function main(): Promise<void> {
           sendJson(res, 404, { error: "session not found" })
           return
         }
-        const removed = inspector.deleteSession(id)
-        const artifacts = await removeSessionArtifacts(dbConfig.dataDir, id)
-        sendJson(res, 200, { ok: true, removed, artifacts })
+        const removedIds = inspector.deleteSession(id)
+        const artifacts: string[] = []
+        for (const deletedId of removedIds) {
+          artifacts.push(...(await removeSessionArtifacts(dbConfig.dataDir, deletedId)))
+        }
+        sendJson(res, 200, { ok: true, removed: removedIds, artifacts })
         return
       }
 
