@@ -202,6 +202,49 @@ export class InspectorDb {
       .all(...ids) as unknown as SessionRow[]
   }
 
+  /**
+   * Walk `parent_id` up to the root ancestor of a session.
+   * Orphan rows (parent id set but parent row missing) are treated as their own root.
+   * Cycle-safe via a seen set.
+   */
+  rootAncestor(id: string): SessionRow | undefined {
+    const seen = new Set<string>()
+    let row = this.getSession(id)
+    while (row && row.parent_id && !seen.has(row.id)) {
+      seen.add(row.id)
+      const parent = this.getSession(row.parent_id)
+      if (!parent) break
+      row = parent
+    }
+    return row
+  }
+
+  /**
+   * Return a session plus every descendant sub-session (recursive via `parent_id`).
+   * The root row comes first; descendants follow ordered by creation time.
+   * Uses `UNION` (deduplicating) so a parent_id cycle cannot loop forever.
+   */
+  subtreeSessions(id: string): SessionRow[] {
+    const ids = this.db
+      .prepare(
+        `WITH RECURSIVE subtree(id) AS (
+           SELECT id FROM session WHERE id = ?
+           UNION
+           SELECT s.id FROM session s JOIN subtree t ON s.parent_id = t.id
+         )
+         SELECT id FROM subtree`
+      )
+      .all(id) as { id: string }[]
+    if (ids.length === 0) return []
+    const rows = this.byIds(ids.map((r) => r.id))
+    const byId = new Map(rows.map((r) => [r.id, r]))
+    const root = byId.get(id)
+    const rest = rows
+      .filter((r) => r.id !== id)
+      .sort((a, b) => a.time_created - b.time_created || a.id.localeCompare(b.id))
+    return root ? [root, ...rest] : rest
+  }
+
   messagesV1(sessionID: string): MessageRow[] {
     return this.db
       .prepare(`SELECT * FROM message WHERE session_id = ? ORDER BY time_created, id`)

@@ -3,7 +3,32 @@ import { formatTimestamp, pctDuration, type MsgN, type Part, type SessionDetail,
 export interface RenderOptions {
   readonly dbFilename: string
   readonly generatedAt: string
+  /** Show the `export html` button. Hidden when viewing a sub-agent session directly. */
+  readonly showExport: boolean
 }
+
+/** A session plus its nested sub-agent sessions, depth-first. */
+export interface SessionTree {
+  readonly detail: SessionDetail
+  readonly children: readonly SessionTree[]
+}
+
+interface FlatSection {
+  readonly node: SessionTree
+  readonly depth: number
+}
+
+function flattenTree(tree: SessionTree): FlatSection[] {
+  const out: FlatSection[] = []
+  const walk = (node: SessionTree, depth: number): void => {
+    out.push({ node, depth })
+    for (const child of node.children) walk(child, depth + 1)
+  }
+  walk(tree, 0)
+  return out
+}
+
+const truncate = (value: string, max: number): string => (value.length > max ? `${value.slice(0, max - 1)}…` : value)
 
 const APP_NAME = "opencode-session-inspector"
 
@@ -194,7 +219,7 @@ function metaRow(key: string, value: string, extra = ""): string {
   return `<div class="meta-row"><span class="meta-key">${esc(key)}</span><span class="meta-value">${esc(value)}</span>${extra}</div>`
 }
 
-function renderInfo(info: SessionInfoN, messageCount: number, totalTools: number): string {
+function renderInfo(info: SessionInfoN, messageCount: number, totalTools: number, inFileIds?: ReadonlySet<string>): string {
   const model = info.model ? `${info.model.providerID}/${info.model.modelID}${info.model.variant ? `@${info.model.variant}` : ""}` : (info.agent ?? "—")
   const meta: string[] = []
   meta.push(metaRow("session id", info.id))
@@ -215,7 +240,12 @@ function renderInfo(info: SessionInfoN, messageCount: number, totalTools: number
   meta.push(metaRow("tool calls", String(totalTools)))
   meta.push(metaRow("cost", fmtCost(info.cost)))
   meta.push(metaRow("tokens", tokensLine(info.tokens)))
-  if (info.parentId) meta.push(metaRow("parent", info.parentId))
+  if (info.parentId) {
+    const inFile = inFileIds?.has(info.parentId) ?? false
+    const href = inFile ? `#sess-${esc(info.parentId)}` : `/session/${esc(info.parentId)}`
+    const target = inFile ? "" : ` target="_blank" rel="noopener"`
+    meta.push(`<div class="meta-row"><span class="meta-key">parent</span><span class="meta-value"><a href="${href}"${target}>${esc(info.parentId)}</a></span></div>`)
+  }
   return `<div class="meta">${meta.join("")}</div>`
 }
 
@@ -255,35 +285,73 @@ function renderSegmentBar(messages: readonly MsgN[]): string {
   </section>`
 }
 
-export function renderDetail(detail: SessionDetail, options: RenderOptions): string {
-  const messages = detail.messages
-  const totalTools = messages.reduce((acc, msg) => acc + msg.parts.filter((p) => p.kind === "tool").length, 0)
-  const messageCount = messages.length
-  const inner = messages.map(renderMessage).join("")
+function sessionStats(detail: SessionDetail): { messageCount: number; totalTools: number } {
+  const totalTools = detail.messages.reduce((acc, msg) => acc + msg.parts.filter((p) => p.kind === "tool").length, 0)
+  return { messageCount: detail.messages.length, totalTools }
+}
 
+function renderSectionNav(sections: readonly FlatSection[]): string {
+  const items = sections
+    .map(({ node, depth }) => {
+      const info = node.detail.info
+      const role = depth === 0 ? "main" : "sub"
+      const label = depth === 0 ? info.agent ?? "main" : info.agent ?? `sub-${depth}`
+      const title = info.title || "(untitled)"
+      return `<a class="nav-sect nav-sect-${role}" href="#sess-${esc(info.id)}" title="${esc(title)}"${depth ? ` style="margin-left:${depth * 14}px"` : ""}><span class="nav-role">${role}</span><span class="nav-agent">${esc(label)}</span><span class="nav-title">${esc(truncate(title, 28))}</span></a>`
+    })
+    .join("")
+  return `<nav class="sect-nav"><span class="sect-nav-label">sections</span>${items}</nav>`
+}
+
+function renderSection(node: SessionTree, depth: number, inFileIds: ReadonlySet<string>): string {
+  const detail = node.detail
+  const info = detail.info
+  const { messageCount, totalTools } = sessionStats(detail)
+  const role = depth === 0 ? "main" : "sub"
+  const agentLabel = info.agent ?? "—"
+  return `<section class="sess sess-${role}" id="sess-${esc(info.id)}" data-depth="${depth}">
+    <div class="sess-head">
+      <span class="chip chip-agent">agent</span> <code class="sess-agent">${esc(agentLabel)}</code>
+      <span class="chip ${depth === 0 ? "chip-stop" : "chip-subtag"}">${role}</span>
+      <h2 class="sess-title">${esc(info.title || "(untitled session)")}</h2>
+      <span class="muted sess-meta-line"><code>${esc(info.id)}</code> · ${messageCount} msg${messageCount === 1 ? "" : "s"} · ${totalTools} tool call${totalTools === 1 ? "" : "s"} · ${esc(formatTimestamp(info.timeUpdated))}</span>
+    </div>
+    ${renderInfo(info, messageCount, totalTools, inFileIds)}
+    ${renderSegmentBar(detail.messages)}
+    <div class="transcript">${detail.messages.map(renderMessage).join("") || `<div class="empty">No messages in this session.</div>`}</div>
+    ${node.children.map((child) => renderSection(child, depth + 1, inFileIds)).join("")}
+  </section>`
+}
+
+export function renderDetail(tree: SessionTree, options: RenderOptions): string {
+  const sections = flattenTree(tree)
+  const inFileIds = new Set(sections.map(({ node }) => node.detail.info.id))
+  const root = tree.detail
   const auditLine = `Generated ${esc(options.generatedAt)} · DB ${esc(options.dbFilename)} · ${APP_NAME}`
+  const exportBtn = options.showExport
+    ? `<a id="exportBtn" class="top-btn" href="/session/${esc(root.info.id)}?export=1" download>export html</a>`
+    : ""
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(detail.info.title || detail.info.id)}</title>
+<title>${esc(root.info.title || root.info.id)}</title>
 <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${css()}</style>
 </head>
 <body>
 <header class="top">
-  <h1 class="session-title">${esc(detail.info.title || "(untitled session)")}</h1>
+  <h1 class="session-title">${esc(root.info.title || "(untitled session)")}</h1>
   <div class="top-actions">
-    <a id="exportBtn" class="top-btn" href="/session/${esc(detail.info.id)}?export=1" download>export html</a>
+    ${exportBtn}
     <button id="toggleAll" type="button">expand/collapse all</button>
     <button id="themeToggle" type="button" title="Toggle light/dark mode">light</button>
   </div>
 </header>
-${renderInfo(detail.info, messageCount, totalTools)}
-${renderSegmentBar(messages)}
-<div class="transcript">${inner || `<div class="empty">No messages in this session.</div>`}</div>
+${renderSectionNav(sections)}
+<div class="sess-tree">${renderSection(tree, 0, inFileIds)}</div>
 <footer class="footer">${auditLine}</footer>
 <button id="toTop" type="button" title="Back to top">↑</button>
 <script>${jsToggle()}</script>
@@ -296,7 +364,7 @@ function jsToggle(): string {
   const details = document.querySelectorAll(".transcript details")
   const anyClosed = Array.from(details).some((d) => !d.open)
   details.forEach((d) => (d.open = anyClosed))
-});document.querySelector(".segment-bar")?.addEventListener("click", (event) => {
+});document.querySelectorAll(".segment-bar").forEach((bar) => bar.addEventListener("click", (event) => {
   const seg = event.target.closest(".seg")
   if (!seg) return
   const target = document.getElementById(seg.dataset.target)
@@ -306,6 +374,18 @@ function jsToggle(): string {
   target.classList.remove("flash")
   void target.offsetWidth
   target.classList.add("flash")
+}));document.querySelector(".sect-nav")?.addEventListener("click", (event) => {
+  const link = event.target.closest(".nav-sect")
+  if (!link) return
+  const href = link.getAttribute("href") || ""
+  if (!href.startsWith("#sess-")) return
+  const target = document.getElementById(href.slice(1))
+  if (!target) return
+  event.preventDefault()
+  target.scrollIntoView({ behavior: "smooth", block: "start" })
+  target.classList.remove("sect-flash")
+  void target.offsetWidth
+  target.classList.add("sect-flash")
 });document.getElementById("toTop")?.addEventListener("click", () => {
   window.scrollTo({ top: 0, behavior: "smooth" })
 });const themeBtn = document.getElementById("themeToggle")
@@ -363,7 +443,7 @@ pre{white-space:pre-wrap;word-break:break-word;margin:0}
 .msg.flash{animation:segflash 1.6s ease-out}
 .transcript{max-width:1020px;margin:0 auto;padding:18px 20px 60px}
 .empty{padding:40px;color:var(--muted);text-align:center}
-.msg{border:1px solid var(--border);border-radius:12px;background:var(--panel);margin:14px 0;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.04);scroll-margin-top:72px}
+.msg{border:1px solid var(--border);border-radius:12px;background:var(--panel);margin:14px 0;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.04);scroll-margin-top:110px}
 .msg-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--head);font-size:12px}
 details.msg>summary{list-style:none;cursor:pointer;user-select:none}
 details.msg>summary::-webkit-details-marker{display:none}
@@ -417,6 +497,28 @@ details.msg:not([open])>summary{border-bottom:none}
 .patch-files{margin:8px 0 0;padding-left:22px}
 .patch-files li{margin:2px 0}
 .subtask-prompt{margin-top:8px}
+.sect-nav{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 20px;border-bottom:1px solid var(--border);background:var(--wash);position:sticky;top:53px;z-index:4}
+.sect-nav-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-right:4px}
+.nav-sect{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--chip);border-radius:999px;padding:3px 10px;font-size:11.5px;color:var(--fg);text-decoration:none;max-width:280px;transition:border-color .15s ease,background .15s ease}
+.nav-sect:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));text-decoration:none}
+.nav-role{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+.nav-sect-main .nav-role{color:var(--role-asst)}
+.nav-agent{font-weight:700;color:var(--role-asst)}
+.nav-title{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess-tree{max-width:1020px;margin:0 auto;padding:18px 20px 60px}
+.sess{border:1px solid var(--border);border-radius:14px;background:var(--panel);margin:0 0 26px;padding:0;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.04);scroll-margin-top:110px}
+.sess-sub{margin-left:26px;border-style:dashed}
+.sess-sub .sess-sub{margin-left:18px}
+.sess-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--head)}
+.sess-title{margin:0;font-size:15px;font-weight:650;letter-spacing:-.01em;min-width:0;overflow-wrap:anywhere;flex:1 1 auto}
+.sess-agent{font-weight:700}
+.sess-meta-line{font-size:11.5px;font-variant-numeric:tabular-nums;word-break:break-all}
+.sess-subtag{--c1:#5ac8fa;background:color-mix(in srgb,var(--c1) 15%,transparent);color:color-mix(in srgb,var(--c1) 74%,var(--fg));border-color:color-mix(in srgb,var(--c1) 28%,transparent)}
+.sess .meta{border-bottom:1px solid var(--border)}
+.sess .segment-wrap{border-bottom:1px solid var(--border)}
+.sess .transcript{padding:14px 16px 16px;max-width:none;margin:0}
+@keyframes sectflash{0%{box-shadow:0 0 0 3px var(--accent)}100%{box-shadow:0 0 0 3px transparent}}
+.sess.sect-flash{animation:sectflash 1.6s ease-out}
 .footer{text-align:center;color:var(--muted);font-size:12px;padding:20px;border-top:1px solid var(--border)}
 #toTop{position:fixed;right:20px;bottom:20px;z-index:30;width:44px;height:44px;border-radius:50%;background:color-mix(in srgb,var(--panel) 84%,transparent);backdrop-filter:blur(12px);color:var(--fg);border:1px solid var(--border);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(0,0,0,.18);transition:border-color .15s ease,background .15s ease,transform .1s ease}
 #toTop:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border));background:var(--hover);transform:translateY(-1px)}

@@ -75,7 +75,10 @@ async function render() {
     $("pageInfo").textContent = `${data.offset + 1}–${data.offset + data.sessions.length} of ${data.total}`
     $("btnPrev").disabled = data.offset <= 0
     $("btnNext").disabled = data.offset + data.sessions.length >= data.total
-    $("checkAll").checked = data.sessions.length > 0 && data.sessions.every((s) => selected.has(s.id))
+    const pageAll = [...(data.parents || []), ...data.sessions]
+    const pageIds = new Set(pageAll.map((s) => s.id))
+    const selectable = pageAll.filter((s) => !s.parentId || !pageIds.has(s.parentId))
+    $("checkAll").checked = selectable.length > 0 && selectable.every((s) => selected.has(s.id))
     updateBulkDelete()
 
     if (data.sessions.length === 0) {
@@ -111,11 +114,24 @@ function buildHierarchyRows(sessions) {
 
 function sessionRow(s, sub, orphan, depth) {
   const padStyle = sub ? ` style="padding-left:${46 + Math.max(0, depth - 1) * 22}px"` : ""
+  // Child sessions are managed through their main (root) session: no checkbox,
+  // export or delete on their rows. Orphans (parent gone from the db) count as roots.
+  const isRoot = !sub || orphan
   const checked = selected.has(s.id) ? " checked" : ""
-  return `<tr class="${sub ? "sub-row" : "main-row"}${selected.has(s.id) ? " row-selected" : ""}" data-id="${esc(s.id)}">
-    <td class="col-check-td">
-      <input type="checkbox" class="row-check" data-id="${esc(s.id)}"${checked}>
-    </td>
+  const checkCell = isRoot
+    ? `<input type="checkbox" class="row-check" data-id="${esc(s.id)}"${checked}>`
+    : ""
+  const actions = isRoot
+    ? `<div class="row-actions">
+        <a class="action-btn" href="/session/${esc(s.id)}" target="_blank" rel="noopener">open</a>
+        <a class="action-btn" href="/session/${esc(s.id)}?export=1" target="_blank" rel="noopener" download>export</a>
+        <button class="action-btn danger" data-action="delete">delete</button>
+      </div>`
+    : `<div class="row-actions">
+        <a class="action-btn" href="/session/${esc(s.id)}" target="_blank" rel="noopener">open</a>
+      </div>`
+  return `<tr class="${sub ? "sub-row" : "main-row"}${selected.has(s.id) ? " row-selected" : ""}" data-id="${esc(s.id)}" data-root="${isRoot ? "1" : "0"}">
+    <td class="col-check-td">${checkCell}</td>
     <td${padStyle}>
       <div class="title-cell">
         ${sub ? '<span class="sub-arrow">↳</span>' : ""}
@@ -130,13 +146,7 @@ function sessionRow(s, sub, orphan, depth) {
     <td>${fmtTime(s.timeUpdated)}</td>
     <td>${s.messageCount}</td>
     <td>${fmtCost(s.cost)}</td>
-    <td>
-      <div class="row-actions">
-        <a class="action-btn" href="/session/${esc(s.id)}" target="_blank" rel="noopener">open</a>
-        <a class="action-btn" href="/session/${esc(s.id)}?export=1" target="_blank" rel="noopener" download>export</a>
-        <button class="action-btn danger" data-action="delete">delete</button>
-      </div>
-    </td>
+    <td>${actions}</td>
   </tr>`
 }
 

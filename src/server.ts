@@ -3,8 +3,8 @@ import { readFile } from "fs/promises"
 import { join } from "path"
 import { fileURLToPath } from "url"
 import { InspectorDb, removeSessionArtifacts, type SessionRow } from "./db.ts"
-import { buildDetail } from "./decode.ts"
-import { renderDetail } from "./render.ts"
+import { buildDetail, type SessionDetail } from "./decode.ts"
+import { renderDetail, type SessionTree } from "./render.ts"
 import { DEFAULT_PORT, resolveDb } from "./paths.ts"
 
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]+$/
@@ -137,6 +137,47 @@ function sessionView(row: SessionRow) {
     messageCount: (row.message_count ?? 0) + (row.smessage_count ?? 0),
     v2: (row.smessage_count ?? 0) > 0,
   }
+}
+
+function buildSessionTree(inspector: InspectorDb, root: SessionRow): SessionTree {
+  const subtree = inspector.subtreeSessions(root.id)
+  const detailById = new Map<string, SessionDetail>()
+  for (const row of subtree) {
+    const built = buildDetail(inspector, row)
+    if (built) detailById.set(row.id, built)
+  }
+  const rootDetail = detailById.get(root.id) ?? buildDetail(inspector, root)
+  if (!rootDetail) throw new Error(`failed to decode session ${root.id}`)
+  const buildNode = (row: SessionRow): SessionTree => {
+    const detail = detailById.get(row.id)
+    if (!detail) throw new Error(`failed to decode session ${row.id}`)
+    const children = subtree.filter((r) => r.parent_id === row.id).map(buildNode)
+    return { detail, children }
+  }
+  return buildNode(root)
+}
+
+/** Sanitize an agent name for use in a downloaded filename. */
+function agentFilenameToken(agent: string | null | undefined): string {
+  const cleaned = (agent ?? "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")
+  return cleaned.slice(0, 40) || "none"
+}
+
+/**
+ * Map requested session ids to their root ancestor ids (deduped, order kept).
+ * Delete/export always operate on whole main-agent trees; ids of missing
+ * sessions are skipped.
+ */
+function normalizeRootIds(inspector: InspectorDb, ids: readonly string[]): string[] {
+  const roots: string[] = []
+  const seen = new Set<string>()
+  for (const id of ids) {
+    const root = inspector.rootAncestor(id)
+    if (!root || seen.has(root.id)) continue
+    seen.add(root.id)
+    roots.push(root.id)
+  }
+  return roots
 }
 
 function sendText(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8"): void {
@@ -272,7 +313,12 @@ async function main(): Promise<void> {
             return
           }
         }
-        const removedIds = inspector.deleteSessions(ids)
+        const rootIds = normalizeRootIds(inspector, ids)
+        if (rootIds.length === 0) {
+          sendJson(res, 404, { error: "no matching sessions found" })
+          return
+        }
+        const removedIds = inspector.deleteSessions(rootIds)
         const artifacts: string[] = []
         for (const deletedId of removedIds) {
           artifacts.push(...(await removeSessionArtifacts(dbConfig.dataDir, deletedId)))
@@ -292,7 +338,12 @@ async function main(): Promise<void> {
           sendJson(res, 404, { error: "session not found" })
           return
         }
-        const removedIds = inspector.deleteSession(id)
+        const rootIds = normalizeRootIds(inspector, [id])
+        if (rootIds.length === 0) {
+          sendJson(res, 404, { error: "session not found" })
+          return
+        }
+        const removedIds = inspector.deleteSessions(rootIds)
         const artifacts: string[] = []
         for (const deletedId of removedIds) {
           artifacts.push(...(await removeSessionArtifacts(dbConfig.dataDir, deletedId)))
@@ -308,16 +359,27 @@ async function main(): Promise<void> {
           sendText(res, 400, htmlPage("Invalid id", "Invalid session id."))
           return
         }
-        const detail = buildDetail(inspector, inspector.getSession(id))
-        if (!detail) {
+        const opened = inspector.getSession(id)
+        if (!opened) {
           sendText(res, 404, htmlPage("Not found", "Session not found."))
           return
         }
-        const html = renderDetail(detail, { dbFilename: dbConfig.filename, generatedAt: new Date().toISOString() })
-        if (params.get("export") === "1" || params.get("download") === "1") {
+        const isExport = params.get("export") === "1" || params.get("download") === "1"
+        // Views open the requested session's own subtree; exports always cover
+        // the whole main-agent tree (a sub-agent id is normalized to its root).
+        const root = isExport ? inspector.rootAncestor(id) ?? opened : opened
+        const tree = buildSessionTree(inspector, root)
+        const isRoot = inspector.rootAncestor(id)?.id === id
+        const html = renderDetail(tree, {
+          dbFilename: dbConfig.filename,
+          generatedAt: new Date().toISOString(),
+          showExport: isRoot,
+        })
+        if (isExport) {
+          const filename = `session-${agentFilenameToken(root.agent)}-${root.id}.html`
           res.writeHead(200, {
             "content-type": "text/html; charset=utf-8",
-            "content-disposition": `attachment; filename="session-${id}.html"`,
+            "content-disposition": `attachment; filename="${filename}"`,
           })
           res.end(html)
           return

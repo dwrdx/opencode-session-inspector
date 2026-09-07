@@ -29,9 +29,11 @@ through a clean web UI: **open, search, delete, export**.
 |---|---|
 | Open session | Server-rendered full interaction timeline, showing every user/agent exchange as items |
 | Search & filter | Filter sessions by title / directory / agent / model / time range |
-| Delete session | Transactional delete with foreign-key cascade plus best-effort cleanup of per-session files; shared snapshots are never touched |
-| Export HTML | Downloads the session as **a single self-contained HTML file** that fully reproduces the interaction, for archiving and analysis |
-| Parent/child hierarchy | Sub-sessions (`parent_id`) are nested under their parent in the list; missing parents are completed across pages automatically |
+| Delete by main agent | Delete works at main-agent granularity: select a root session and the whole tree (all sub-agent sessions) is removed in one transaction; sub-agent rows are not selectable or deletable individually |
+| Export HTML | Exports a main-agent session **together with all its sub-agent sessions** as a single self-contained HTML file (`session-{agent}-{id}.html`); every section is labeled with its agent name. Sub-agent sessions cannot be exported separately |
+| Sub-agent viewing | Sub-agent sessions can still be opened individually in their own tab for viewing (a sub-agent page hides the export button and links back to its parent) |
+| Parent/child hierarchy | Sub-sessions (`parent_id`) are nested under their parent in the list and in the detail view; missing parents are completed across pages automatically |
+| Sections navigation | The detail/export page renders every session (main + sub-agents) as a uniform section with an agent-name header; the always-visible sections bar at the top jumps to each one |
 | Token segment bar | A User (gold) / ASSISTANT (indigo) bar under the metadata that shows the session structure by per-message token share; clicking a segment jumps to that card |
 | Light & dark themes | `light` / `dark` toggle in the header, Apple-inspired palette, choice persisted |
 | In-card folding | Every card folds as a whole; the `step start` row has a `collapse` / `expand` button to fold/unfold all details inside a card |
@@ -68,17 +70,28 @@ CLI options:
 - **Hierarchy**: sub-sessions are indented below their parent with a `↳` arrow, a muted
   `sub` tag and a left guide line; parents missing from the current page are completed
   automatically so the structure is never broken by pagination.
-- **Row actions**: `open` (open detail in a new tab), `export` (download HTML),
-  `delete` (with a confirmation dialog).
+- **Row actions**: root (main-agent) rows have `open` / `export` / `delete`; sub-agent
+  rows only have `open`, because delete and export operate on the whole main-agent tree.
+  Orphaned sub-rows (their parent no longer exists) keep the full actions.
+- **Delete**: only root rows are selectable. Deleting a main-agent session removes it
+  together with every descendant sub-agent session (confirmation dialog warns about this).
 - **Top bar**: `refresh` to reload the list, `light/dark` theme toggle, plus the active
   database path and total session count.
 
 ## Session detail page
 
-Layout (top to bottom): sticky title bar → metadata area → token segment bar → message timeline.
+Layout (top to bottom): sticky title bar → sections navigation bar → main session section
+(metadata → token segment bar → message timeline) → sub-agent session sections nested below.
 
+- **Sections navigation**: always visible; lists the main session plus every sub-agent
+  session with its agent name. Click an entry to jump to that section (flashing highlight).
+  A session with no sub-agents shows a single `main` entry, so the layout is identical.
+- **Sections**: every session (main or sub) renders as one bordered section headed by an
+  `agent` chip with the agent name, a `main` / `sub` tag, title, session id, message and
+  tool-call counts. Sub-agent sections are indented and dashed-bordered.
 - **Metadata**: session id, title, created/updated time, directory, version, project,
-  workspace, agent, model, message count, tool-call count, cost and token totals.
+  workspace, agent, model, message count, tool-call count, cost and token totals;
+  a `parent` link jumps to the parent section (or the parent page).
 - **Token segment bar**: segments in message order, colored User (gold) / ASSISTANT
   (indigo); width = message tokens / session token total. Hover for message details;
   **click a segment to jump to the card** with a highlight flash.
@@ -91,17 +104,19 @@ Layout (top to bottom): sticky title bar → metadata area → token segment bar
   - Assistant content is rendered item by item: reasoning (collapsible), tool-call
     cards (input / output / error, collapsed by default), `step finish` with its token
     chips, patches, retries, etc.
-- **Title bar actions**: `export html` (download this session), `expand/collapse all`,
+- **Title bar actions**: `export html` (download this main-agent tree; hidden on
+  sub-agent pages since sub-agents are exported with their root), `expand/collapse all`,
   `light/dark` theme toggle.
 - **Bottom right**: a circular `↑` button that scrolls back to top, always visible.
 
 ## HTML export
 
-- Triggered from the list page (`export`) or the detail page (`export html`).
-- Produces **one self-contained `.html`** file: CSS, JS and favicon are all inlined
+- Triggered from the list page (`export` on root rows) or the detail page (`export html`).
+- Produces **one self-contained `.html`** file named `session-{agent}-{id}.html` (agent
+  name sanitized, falls back to `none`): CSS, JS and favicon are all inlined
   (base64), no external dependencies — openable offline, printable, archive-ready.
-- Shares the same renderer as the detail page, so what you see is exactly what is
-  exported.
+- The file contains the main-agent session **and every sub-agent session**, each as its
+  own clearly labeled section, sharing the exact renderer as the detail page.
 - An audit footer records the export time, database path and tool version.
 
 ## Database path resolution
@@ -122,8 +137,10 @@ Layout (top to bottom): sticky title bar → metadata area → token segment bar
 - **Dual-layout reads**: V1 tables (`message` + `part`) are preferred for full history;
   when empty, the tool falls back to V2 (`session_message` + `session_input`), including
   pending inbox prompts.
-- **Delete scope**: transactional cascade over `message` / `part` / `todo` /
-  `session_message` / `session_input`, plus best-effort cleanup of session-owned files
+- **Delete scope**: delete and export operate at main-agent granularity. The UI only
+  selects root sessions; the server normalizes any id to its root ancestor. A delete then
+  cascades transactionally over the whole tree (`message` / `part` / `todo` /
+  `session_message` / `session_input`), plus best-effort cleanup of session-owned files
   on disk (e.g. `storage/session_diff/<id>.json`). Shared snapshots are never touched.
 - **Consistent rendering**: detail page and export share `src/render.ts`.
 
