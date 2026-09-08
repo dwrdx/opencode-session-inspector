@@ -374,6 +374,7 @@ async function main(): Promise<void> {
           dbFilename: dbConfig.filename,
           generatedAt: new Date().toISOString(),
           showExport: isRoot,
+          standalone: isExport,
         })
         if (isExport) {
           const filename = `session-${agentFilenameToken(root.agent)}-${root.id}.html`

@@ -35,7 +35,7 @@ through a clean web UI: **open, search, delete, export**.
 | Parent/child hierarchy | Sub-sessions (`parent_id`) are nested under their parent in the list and in the detail view; missing parents are completed across pages automatically |
 | Sections navigation | The detail/export page renders every session (main + sub-agents) as a uniform section with an agent-name header; the always-visible sections bar at the top jumps to each one |
 | Token segment bar | A User (gold) / ASSISTANT (indigo) bar under the metadata that shows the session structure by per-message token share; clicking a segment jumps to that card |
-| Light & dark themes | `light` / `dark` toggle in the header, Apple-inspired palette, choice persisted |
+| Light & dark themes | `system` / `light` / `dark` tri-state toggle in the header; defaults to the OS preference, manual choice is persisted and `system` mode reacts live to OS changes |
 | In-card folding | Every card folds as a whole; the `step start` row has a `collapse` / `expand` button to fold/unfold all details inside a card |
 | Full metrics | Per message: cost, input/output/reasoning/cache token breakdown |
 
@@ -75,8 +75,10 @@ CLI options:
   Orphaned sub-rows (their parent no longer exists) keep the full actions.
 - **Delete**: only root rows are selectable. Deleting a main-agent session removes it
   together with every descendant sub-agent session (confirmation dialog warns about this).
-- **Top bar**: `refresh` to reload the list, `light/dark` theme toggle, plus the active
-  database path and total session count.
+- **Top bar**: `refresh` and the tri-state `system/light/dark` theme toggle, plus the active
+  database path and total session count. The list uses a card-style data table with a sticky
+  header, skeleton loading states, icon row actions that reveal on hover, and a blurred-glass
+  delete-confirmation dialog.
 
 ## Session detail page
 
@@ -154,6 +156,7 @@ tools/session-inspector/
 ├─ public/               # List page static assets (no build step)
 │  ├─ index.html
 │  ├─ app.js
+│  ├─ tokens.css         # Shared design system (inlined into detail/export too)
 │  ├─ styles.css
 │  └─ favicon.svg
 └─ src/

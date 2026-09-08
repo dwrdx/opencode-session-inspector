@@ -5,68 +5,107 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>opencode-session-inspector</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <header class="app-top">
   <div class="brand">
-    <h1>opencode-session-inspector</h1>
-    <span id="dbPath" class="db-path muted">…</span>
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="22" height="22">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#6e79d6"/>
+            <stop offset="1" stop-color="#3b4290"/>
+          </linearGradient>
+        </defs>
+        <rect width="32" height="32" rx="8" fill="url(#lg)"/>
+        <rect x="6" y="12" width="9" height="8" rx="3" fill="#f6f7fa"/>
+        <rect x="17" y="12" width="9" height="8" rx="3" fill="#e8a83d"/>
+      </svg>
+    </span>
+    <div class="brand-text">
+      <h1>session inspector</h1>
+      <span id="dbPath" class="db-path" title="database path">…</span>
+    </div>
   </div>
   <div class="tools">
-    <span id="statTotal" class="muted"></span>
-    <button id="themeToggle" type="button" title="Toggle light/dark mode">light</button>
-    <button id="btnRefresh" type="button" title="Refresh">refresh</button>
-    <button id="btnBulkDelete" type="button" class="danger" title="Delete selected sessions" disabled>delete selected</button>
+    <span id="statTotal" class="stat-total"></span>
+    <button id="btnBulkDelete" type="button" class="btn btn-danger" disabled title="Delete selected sessions">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      <span class="bulk-label">delete selected</span>
+    </button>
+    <button id="btnRefresh" type="button" class="btn btn-icon" title="Refresh">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
+    <button id="themeToggle" type="button" class="btn btn-icon" title="Theme: system">
+      <svg class="ic-system" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      <svg class="ic-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      <svg class="ic-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
   </div>
 </header>
 
 <section class="filters" aria-label="Session filters">
-  <input id="fSearch" type="search" placeholder="Search title, directory, agent…" autocomplete="off">
-  <input id="fAgent" type="text" placeholder="Agent" autocomplete="off">
-  <input id="fModel" type="text" placeholder="Model" autocomplete="off">
-  <span class="filter-sep"></span>
-  <label>from <input id="fFrom" type="datetime-local" step="1"></label>
-  <label>to <input id="fTo" type="datetime-local" step="1"></label>
-  <button id="btnApply" type="button">apply</button>
-  <button id="btnClear" type="button">clear</button>
+  <div class="search-field">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input id="fSearch" type="search" placeholder="Search title, directory, agent…" autocomplete="off" spellcheck="false">
+  </div>
+  <input id="fAgent" class="field" type="text" placeholder="Agent" autocomplete="off" spellcheck="false">
+  <input id="fModel" class="field" type="text" placeholder="Model" autocomplete="off" spellcheck="false">
+  <label class="date-field">from <input id="fFrom" class="field" type="datetime-local" step="1"></label>
+  <label class="date-field">to <input id="fTo" class="field" type="datetime-local" step="1"></label>
+  <button id="btnApply" type="button" class="btn btn-primary">apply</button>
+  <button id="btnClear" type="button" class="btn btn-ghost">clear</button>
 </section>
 
-<main>
-  <table class="sessions">
-    <thead>
-      <tr>
-        <th class="col-check">
-          <input id="checkAll" type="checkbox" title="Select all on this page">
-        </th>
-        <th class="col-title">title</th>
-        <th class="col-dir">directory</th>
-        <th class="col-agent">agent</th>
-        <th class="col-model">model</th>
-        <th class="col-updated">updated</th>
-        <th class="col-count">msgs</th>
-        <th class="col-cost">cost</th>
-        <th class="col-actions">actions</th>
-      </tr>
-    </thead>
-    <tbody id="sessionsBody">
-      <tr><td colspan="9" class="empty-td muted">loading…</td></tr>
-    </tbody>
-  </table>
+<main class="page">
+  <div class="table-card">
+    <table class="sessions">
+      <thead>
+        <tr>
+          <th class="col-check"><input id="checkAll" type="checkbox" title="Select all on this page"></th>
+          <th class="col-title">title</th>
+          <th class="col-dir">directory</th>
+          <th class="col-agent">agent</th>
+          <th class="col-model">model</th>
+          <th class="col-updated">updated</th>
+          <th class="col-count">msgs</th>
+          <th class="col-cost">cost</th>
+          <th class="col-actions"></th>
+        </tr>
+      </thead>
+      <tbody id="sessionsBody">
+        <tr><td colspan="9" class="empty-td muted">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
   <div class="pager">
-    <button id="btnPrev" type="button">‹ prev</button>
     <span id="pageInfo" class="muted"></span>
-    <button id="btnNext" type="button">next ›</button>
+    <div class="pager-btns">
+      <button id="btnPrev" type="button" class="btn btn-icon" title="Previous page" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <button id="btnNext" type="button" class="btn btn-icon" title="Next page" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
   </div>
 </main>
 
 <div id="confirmOverlay" class="overlay" hidden>
   <div class="confirm" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <span class="confirm-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    </span>
     <h2 id="confirmTitle">Delete session</h2>
     <p id="confirmText"></p>
     <div class="confirm-actions">
-      <button id="btnCancel" type="button" class="ghost">cancel</button>
-      <button id="btnDelete" type="button" class="danger">delete</button>
+      <button id="btnCancel" type="button" class="btn">cancel</button>
+      <button id="btnDelete" type="button" class="btn btn-danger">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        delete
+      </button>
     </div>
   </div>
 </div>
